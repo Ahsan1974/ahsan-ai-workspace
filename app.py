@@ -102,13 +102,16 @@ def create_app(config_object: type = Config) -> Flask:
     return app
 
 
+# Vercel / WSGI entrypoint — must be a top-level Flask instance named "app".
+app = create_app()
+
+
 def main() -> None:
     host = Config.FLASK_HOST
     if host not in {"127.0.0.1", "localhost"}:
         logger.warning("Refusing non-local host binding (%s); using 127.0.0.1", host)
         host = "127.0.0.1"
 
-    app = create_app()
     logger.info("Starting Personal AI Workspace at http://%s:%s", host, Config.FLASK_PORT)
     app.run(host=host, port=Config.FLASK_PORT, debug=Config.FLASK_DEBUG, threaded=True)
 
