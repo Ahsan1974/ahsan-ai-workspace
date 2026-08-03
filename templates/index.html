@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="app-shell" id="app-shell">
+  <aside class="sidebar" id="sidebar" aria-label="Conversations sidebar">
+    <div class="sidebar-header">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">AI</div>
+        <div>
+          <div class="brand-name">Ahsan AI Workspace</div>
+          <div class="brand-sub">Local multi-LLM desk</div>
+        </div>
+      </div>
+      <button type="button" class="icon-btn" id="btn-collapse-sidebar" title="Collapse sidebar" aria-label="Collapse sidebar">
+        <i class="fa-solid fa-angles-left"></i>
+      </button>
+    </div>
+
+    <button type="button" class="btn btn-primary btn-new-chat" id="btn-new-chat">
+      <i class="fa-solid fa-plus"></i>
+      <span>New Chat</span>
+    </button>
+
+    <div class="sidebar-search">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" id="conversation-search" placeholder="Search conversations" aria-label="Search conversations">
+    </div>
+
+    <div class="conversation-list" id="conversation-list" role="list"></div>
+
+    <div class="sidebar-footer">
+      <div class="storage-pill" id="storage-usage-label" title="Approximate chat storage">Storage: —</div>
+      <div class="provider-pill" title="Active provider">
+        <span class="status-dot" id="provider-status-dot"></span>
+        <span>Provider: <strong id="sidebar-provider-label">Groq</strong></span>
+      </div>
+      <div class="sidebar-footer-actions">
+        <button type="button" class="icon-btn" id="btn-theme-toggle" title="Toggle theme" aria-label="Toggle theme">
+          <i class="fa-solid fa-moon" id="theme-toggle-icon"></i>
+        </button>
+        <button type="button" class="icon-btn" id="btn-open-settings" title="Settings" aria-label="Open settings">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+  <main class="main-panel">
+    <header class="topbar">
+      <div class="topbar-row topbar-row-title">
+        <div class="topbar-left">
+          <button type="button" class="icon-btn btn-open-sidebar" id="btn-open-sidebar" title="Open sidebar" aria-label="Open sidebar">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <h1 class="topbar-title" id="current-conversation-title">New Chat</h1>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="icon-btn" id="btn-open-dashboard" title="Usage dashboard" aria-label="Open dashboard">
+            <i class="fa-solid fa-chart-simple"></i>
+          </button>
+          <button type="button" class="icon-btn" id="btn-top-settings" title="Settings" aria-label="Open settings">
+            <i class="fa-solid fa-sliders"></i>
+          </button>
+        </div>
+      </div>
+      <div class="topbar-row topbar-strip" id="topbar-strip">
+        <label class="strip-field">
+          <span>Provider</span>
+          <select id="provider-select" aria-label="Provider"></select>
+        </label>
+        <label class="strip-field strip-field-model">
+          <span>Model</span>
+          <select id="model-select" aria-label="Model"></select>
+        </label>
+        <div class="strip-stat" title="Tokens used today for this provider">
+          <span>Total Tokens</span>
+          <strong id="stat-total-tokens">0</strong>
+        </div>
+        <div class="strip-stat" title="Estimated tokens left today for this provider">
+          <span>Left Tokens</span>
+          <strong id="stat-left-tokens">—</strong>
+        </div>
+      </div>
+      <p class="strip-hint" id="provider-hint">Tip: <strong>Groq</strong> ≠ Grok. For xAI Grok use Provider <strong>OpenRouter (xAI Grok)</strong> → model <strong>x-ai/grok-…</strong>. Each chat keeps its own provider, model, and history.</p>
+    </header>
+
+    <section class="chat-panel" id="chat-panel" aria-live="polite">
+      <div class="messages" id="messages"></div>
+
+      <div class="empty-state" id="empty-state">
+        <div class="empty-hero">
+          <div class="empty-orb" aria-hidden="true"></div>
+          <h2>Ahsan AI Workspace</h2>
+          <p>Your local desk for Groq, SambaNova, Gemini, OpenRouter, Mistral, and Cohere — switch providers anytime in the same chat.</p>
+        </div>
+        <div class="api-banner" id="api-banner" hidden>
+          <i class="fa-solid fa-key"></i>
+          <div>
+            <strong>API keys missing</strong>
+            <p>Add provider keys in <code>.env</code> (Groq, SambaNova, Gemini, OpenRouter, Mistral, Cohere), then restart the app.</p>
+          </div>
+        </div>
+        <div class="starter-prompts" id="starter-prompts">
+          <button type="button" class="starter-chip" data-prompt="Explain a Java concept">Explain a Java concept</button>
+          <button type="button" class="starter-chip" data-prompt="Review Python code">Review Python code</button>
+          <button type="button" class="starter-chip" data-prompt="Help with software architecture">Help with software architecture</button>
+          <button type="button" class="starter-chip" data-prompt="Draft a research summary">Draft a research summary</button>
+          <button type="button" class="starter-chip" data-prompt="Explain an error message">Explain an error message</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="composer">
+      <div class="composer-box">
+        <div class="attachment-preview" id="attachment-preview" hidden></div>
+        <textarea id="message-input" rows="1" placeholder="Type a message or attach files..." aria-label="Message input"></textarea>
+        <div class="composer-toolbar">
+          <div class="composer-meta">
+            <button type="button" class="btn btn-ghost btn-attach" id="btn-attach" title="Attach files (Java, PDF, PNG, JPG)" aria-label="Attach files">
+              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+              <span>Attach</span>
+            </button>
+            <input type="file" id="file-input" multiple accept=".java,.pdf,.png,.jpg,.jpeg,.txt,.py,.md,.json,.xml,.yml,.yaml,.cs,.js,.ts,.sql,.html,.css,image/png,image/jpeg,application/pdf" hidden>
+            <span id="char-count">0</span>
+            <button type="button" class="text-btn" id="btn-clear-input" title="Clear input">Clear</button>
+          </div>
+          <div class="composer-actions">
+            <button type="button" class="btn btn-danger" id="btn-stop" hidden title="Stop generation">
+              <i class="fa-solid fa-stop"></i>
+              <span>Stop</span>
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-send" title="Send message (Enter)">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Send</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <p class="composer-hint">Attach Java, PDF, PNG, or JPG · Enter to send · Shift+Enter for a new line</p>
+    </footer>
+  </main>
+</div>
+
+<!-- Confirm dialog -->
+<dialog class="modal-dialog" id="confirm-dialog">
+  <form method="dialog" class="modal-card">
+    <h3 id="confirm-title">Confirm</h3>
+    <p id="confirm-message">Are you sure?</p>
+    <div class="modal-actions">
+      <button type="submit" value="cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" value="confirm" class="btn btn-danger" id="confirm-ok">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Rename dialog -->
+<dialog class="modal-dialog" id="rename-dialog">
+  <form method="dialog" class="modal-card" id="rename-form">
+    <h3>Rename conversation</h3>
+    <label class="field">
+      <span>Title</span>
+      <input type="text" id="rename-input" maxlength="120" required>
+    </label>
+    <div class="modal-actions">
+      <button type="submit" value="cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" value="confirm" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings modal -->
+<dialog class="modal-dialog settings-dialog" id="settings-dialog">
+  <div class="modal-card settings-card">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button type="button" class="icon-btn" id="btn-close-settings" aria-label="Close settings">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="settings-tabs" role="tablist">
+      <button type="button" class="settings-tab active" data-tab="general">General</button>
+      <button type="button" class="settings-tab" data-tab="generation">Generation</button>
+      <button type="button" class="settings-tab" data-tab="data">Data</button>
+      <button type="button" class="settings-tab" data-tab="providers">Providers</button>
+    </div>
+
+    <div class="settings-body">
+      <section class="settings-panel active" data-panel="general">
+        <label class="field">
+          <span>Theme</span>
+          <select id="setting-theme">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Default provider</span>
+          <select id="setting-provider"></select>
+        </label>
+        <label class="field">
+          <span>Default model</span>
+          <select id="setting-model"></select>
+        </label>
+        <label class="checkbox-field">
+          <input type="checkbox" id="setting-confirm-delete" checked>
+          <span>Confirm before deleting conversations</span>
+        </label>
+        <label class="checkbox-field">
+          <input type="checkbox" id="setting-enter-to-send" checked>
+          <span>Enter to send</span>
+        </label>
+      </section>
+
+      <section class="settings-panel" data-panel="generation">
+        <label class="field">
+          <span>Temperature <em id="temperature-value">0.7</em></span>
+          <input type="range" id="setting-temperature" min="0" max="2" step="0.1" value="0.7">
+        </label>
+        <label class="field">
+          <span>Maximum output tokens</span>
+          <input type="number" id="setting-max-tokens" min="1" max="128000" value="4096">
+        </label>
+        <label class="field">
+          <span>Previous messages to include</span>
+          <input type="number" id="setting-context-messages" min="1" max="200" value="30">
+        </label>
+        <label class="field">
+          <span>System prompt</span>
+          <textarea id="setting-system-prompt" rows="12"></textarea>
+        </label>
+        <button type="button" class="btn btn-ghost" id="btn-reset-prompt">Reset to Default</button>
+      </section>
+
+      <section class="settings-panel" data-panel="data">
+        <div class="settings-actions-stack">
+          <button type="button" class="btn btn-ghost" id="btn-export-all">
+            <i class="fa-solid fa-file-export"></i> Export all conversations (JSON)
+          </button>
+          <label class="btn btn-ghost file-label">
+            <i class="fa-solid fa-file-import"></i> Import conversations (JSON)
+            <input type="file" id="import-file" accept="application/json,.json" hidden>
+          </label>
+          <button type="button" class="btn btn-danger" id="btn-clear-all">
+            <i class="fa-solid fa-trash"></i> Clear all conversations
+          </button>
+        </div>
+        <div class="db-path-box">
+          <span>SQLite database location</span>
+          <code id="database-path">instance/personal_ai_workspace.db</code>
+        </div>
+      </section>
+
+      <section class="settings-panel" data-panel="providers">
+        <div id="provider-cards" class="provider-cards"></div>
+        <div id="connection-result" class="connection-result" hidden></div>
+      </section>
+    </div>
+
+    <div class="settings-footer">
+      <button type="button" class="btn btn-ghost" id="btn-cancel-settings">Cancel</button>
+      <button type="button" class="btn btn-primary" id="btn-save-settings">Save settings</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Usage dashboard -->
+<dialog class="modal-dialog settings-dialog" id="dashboard-dialog">
+  <div class="modal-card settings-card">
+    <div class="settings-header">
+      <h2>Usage Dashboard</h2>
+      <button type="button" class="icon-btn" id="btn-close-dashboard" aria-label="Close dashboard">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="settings-body">
+      <p class="dashboard-intro">Token usage for today and all-time. Limits are soft personal budgets from settings/catalog (not hard provider bills).</p>
+      <h3>Today by provider</h3>
+      <div id="dash-provider-today" class="dash-table-wrap"></div>
+      <h3>Today by model</h3>
+      <div id="dash-model-today" class="dash-table-wrap"></div>
+      <h3>All-time by model</h3>
+      <div id="dash-model-all" class="dash-table-wrap"></div>
+    </div>
+    <div class="settings-footer">
+      <button type="button" class="btn btn-ghost" id="btn-refresh-dashboard">Refresh</button>
+      <button type="button" class="btn btn-primary" id="btn-close-dashboard-footer">Close</button>
+    </div>
+  </div>
+</dialog>
+{% endblock %}

@@ -1,0 +1,98 @@
+@media (max-width: 960px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(320px, 88vw);
+    z-index: 40;
+    transform: translateX(-105%);
+    opacity: 1;
+    pointer-events: auto;
+    box-shadow: var(--shadow);
+  }
+
+  .app-shell.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .app-shell.sidebar-collapsed .sidebar {
+    transform: translateX(-105%);
+    opacity: 1;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 30;
+  }
+
+  .mobile-only {
+    display: inline-flex;
+  }
+
+  /* Show open button only when the drawer is closed. */
+  .icon-btn.btn-open-sidebar {
+    display: inline-flex;
+  }
+
+  .app-shell.sidebar-open .icon-btn.btn-open-sidebar {
+    display: none;
+  }
+
+  .topbar {
+    padding: 0.55rem 0.75rem 0.65rem;
+  }
+
+  .topbar-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .messages,
+  .composer {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  .message.user {
+    max-width: 92%;
+  }
+}
+
+@media (max-width: 640px) {
+  .brand-sub {
+    display: none;
+  }
+
+  .composer-hint {
+    display: none;
+  }
+
+  .starter-prompts {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .starter-chip {
+    width: 100%;
+  }
+
+  .settings-card {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .provider-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .topbar-strip {
+    grid-template-columns: 1fr;
+  }
+}

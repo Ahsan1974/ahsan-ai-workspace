@@ -1,0 +1,49 @@
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Database
+instance/*.db
+instance/*.db-journal
+*.db
+*.sqlite
+*.sqlite3
+
+# Exports
+exports/
+*.export.json
+*_export.json
+*_export.md
+
+# Uploads
+instance/uploads/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/

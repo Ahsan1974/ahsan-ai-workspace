@@ -1,0 +1,329 @@
+:root {
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "IBM Plex Mono", Consolas, monospace;
+
+  --bg: #12151a;
+  --bg-elevated: #1a1f27;
+  --bg-soft: #222833;
+  --bg-hover: #2a3140;
+  --border: #303849;
+  --text: #e8ecf3;
+  --text-muted: #9aa5b8;
+  --accent: #3d9a84;
+  --accent-strong: #2f7d6b;
+  --accent-soft: rgba(61, 154, 132, 0.16);
+  --danger: #d16161;
+  --danger-soft: rgba(209, 97, 97, 0.14);
+  --user-bubble: #243043;
+  --assistant-bubble: transparent;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --focus: 0 0 0 3px rgba(61, 154, 132, 0.35);
+  --sidebar-width: 300px;
+  --topbar-height: 64px;
+  --composer-hint: #7f8aa0;
+  --code-bg: #0e1218;
+  --success: #4caf8f;
+  --warning: #d4a24c;
+}
+
+html[data-theme="light"] {
+  --bg: #f3f1eb;
+  --bg-elevated: #fffdf8;
+  --bg-soft: #ece7dc;
+  --bg-hover: #e2dccf;
+  --border: #d5cec0;
+  --text: #1d2430;
+  --text-muted: #5d6675;
+  --accent: #1f6f5b;
+  --accent-strong: #175747;
+  --accent-soft: rgba(31, 111, 91, 0.12);
+  --danger: #b44545;
+  --danger-soft: rgba(180, 69, 69, 0.12);
+  --user-bubble: #e7efe9;
+  --assistant-bubble: transparent;
+  --shadow: 0 18px 40px rgba(40, 35, 25, 0.12);
+  --composer-hint: #7a7468;
+  --code-bg: #f7f4ee;
+  --success: #1f6f5b;
+  --warning: #9a6b1f;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(61, 154, 132, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(80, 110, 180, 0.1), transparent 50%),
+    var(--bg);
+  color: var(--text);
+}
+
+html[data-theme="light"] body {
+  background:
+    radial-gradient(1000px 500px at 0% 0%, rgba(31, 111, 91, 0.08), transparent 55%),
+    radial-gradient(800px 400px at 100% 0%, rgba(170, 130, 70, 0.08), transparent 45%),
+    var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
+/* Must beat .icon-btn { display: inline-flex } (same element has both classes). */
+.icon-btn.btn-open-sidebar {
+  display: none;
+}
+
+.app-shell.sidebar-collapsed .icon-btn.btn-open-sidebar {
+  display: inline-flex;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  background: var(--bg-soft);
+  color: var(--text);
+  transition: background 160ms ease, transform 120ms ease, border-color 160ms ease;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+}
+
+.btn-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.btn-danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.text-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.2rem 0.4rem;
+}
+
+.text-btn:hover {
+  color: var(--text);
+}
+
+.field,
+.field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field span,
+.field-inline span {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select,
+.field textarea,
+.field-inline select,
+.composer-box textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0.65rem 0.8rem;
+}
+
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.field-inline select {
+  min-width: 180px;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.modal-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  max-width: calc(100vw - 2rem);
+}
+
+.modal-dialog::backdrop {
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(480px, 92vw);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+
+.modal-card h3,
+.modal-card h2 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+}
+
+.toast-root {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: min(360px, calc(100vw - 2rem));
+}
+
+.toast {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  box-shadow: var(--shadow);
+  animation: toast-in 180ms ease;
+}
+
+.toast.error {
+  border-left-color: var(--danger);
+}
+
+.toast.success {
+  border-left-color: var(--success);
+}
+
+.toast.warning {
+  border-left-color: var(--warning);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mobile-only {
+  display: none;
+}
+
+.hidden {
+  display: none !important;
+}
