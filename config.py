@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
-INSTANCE_DIR = BASE_DIR / "instance"
+
+
+def running_on_vercel() -> bool:
+    """Vercel sets VERCEL=1 (and usually VERCEL_ENV) in serverless runtimes."""
+    return os.getenv("VERCEL") == "1" or bool(os.getenv("VERCEL_ENV"))
+
+
+# Vercel’s deployment filesystem is read-only except /tmp.
+if running_on_vercel():
+    INSTANCE_DIR = Path(tempfile.gettempdir()) / "ahsan-ai-workspace"
+else:
+    INSTANCE_DIR = BASE_DIR / "instance"
+
 load_dotenv(BASE_DIR / ".env", encoding="utf-8-sig")
 
 APP_NAME = "Ahsan AI Workspace"
@@ -76,7 +89,15 @@ class Config:
     DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
     DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "groq").strip().lower() or "groq"
 
-    if SQLALCHEMY_DATABASE_URI.startswith("sqlite:///"):
+    # On Vercel, always use a writable /tmp SQLite file (unless a remote DB URL is set).
+    if running_on_vercel():
+        remote = (os.getenv("DATABASE_URL") or "").strip()
+        if remote.startswith(("postgres://", "postgresql://", "mysql://")):
+            SQLALCHEMY_DATABASE_URI = remote
+        else:
+            absolute = INSTANCE_DIR / "personal_ai_workspace.db"
+            SQLALCHEMY_DATABASE_URI = f"sqlite:///{absolute.as_posix()}"
+    elif SQLALCHEMY_DATABASE_URI.startswith("sqlite:///"):
         db_path = SQLALCHEMY_DATABASE_URI.replace("sqlite:///", "", 1)
         if not os.path.isabs(db_path):
             absolute = INSTANCE_DIR / Path(db_path).name

@@ -43,7 +43,12 @@ class SecretMaskingFilter(logging.Filter):
 
 def create_app(config_object: type = Config) -> Flask:
     """Application factory used by app.py and tests."""
-    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    # Must be writable: on Vercel this is under /tmp (see config.INSTANCE_DIR).
+    try:
+        INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.exception("Unable to create instance directory at %s", INSTANCE_DIR)
+        raise
 
     app = Flask(
         __name__,
@@ -66,8 +71,22 @@ def create_app(config_object: type = Config) -> Flask:
         # Import models so metadata is registered before create_all.
         import models  # noqa: F401
 
-        db.create_all()
-        SettingsService.ensure_defaults()
+        try:
+            db.create_all()
+            SettingsService.ensure_defaults()
+        except Exception:
+            logger.exception(
+                "Database init failed (uri=%s, instance=%s)",
+                app.config.get("SQLALCHEMY_DATABASE_URI"),
+                INSTANCE_DIR,
+            )
+            raise
+
+    logger.info(
+        "App ready (instance=%s, db=%s)",
+        INSTANCE_DIR,
+        app.config.get("SQLALCHEMY_DATABASE_URI"),
+    )
 
     @app.errorhandler(404)
     def not_found(error):  # noqa: ARG001
