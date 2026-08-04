@@ -86,7 +86,7 @@ class UsageService:
         completion_text: str = "",
     ) -> dict[str, int]:
         usage = getattr(provider_obj, "last_usage", None)
-    if (usage is not None):
+        if usage is not None:
             if hasattr(usage, "normalized"):
                 data = usage.normalized()
             elif isinstance(usage, dict):
