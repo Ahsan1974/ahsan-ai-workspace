@@ -20,7 +20,8 @@ class MissingAPIKeyError(ProviderError):
     def __init__(self, provider: str = "groq") -> None:
         super().__init__(
             "MISSING_API_KEY",
-            f"No API key is configured for {provider}. Add it to your .env file.",
+            f"No API key is configured for {provider}. "
+            "Add it to your local .env file, or in Vercel → Project → Settings → Environment Variables.",
         )
 
 

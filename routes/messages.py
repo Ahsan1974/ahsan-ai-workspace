@@ -114,6 +114,9 @@ def _history_with_provider_content(
 @messages_bp.post("/conversations/<int:conversation_id>/messages")
 def send_message(conversation_id: int):
     raw_content, provider_in, model_in, stream, files = _parse_send_request()
+    # Hosted serverless often breaks SSE; prefer reliable JSON completions there.
+    if not current_app.config.get("PREFER_STREAM", True):
+        stream = False
 
     settings = SettingsService.get_all()
     try:
@@ -306,6 +309,7 @@ def send_message(conversation_id: int):
             mimetype="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -445,6 +449,7 @@ def regenerate_message(message_id: int):
             mimetype="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
             },
         )

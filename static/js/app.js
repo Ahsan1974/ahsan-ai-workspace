@@ -30,13 +30,7 @@
   function applySettings(settings) {
     state.settings = settings || {};
     applyTheme(state.settings.theme || "dark");
-    if (state.settings.default_provider) {
-      const providerSelect = $("provider-select");
-      if (providerSelect) providerSelect.value = state.settings.default_provider;
-    }
-    if (state.settings.default_model) {
-      syncModelSelects(state.settings.default_model);
-    }
+    // Do not force a disabled / unconfigured provider into the select.
     if ($("database-path") && settings.database_path) {
       $("database-path").textContent = settings.database_path;
     }
@@ -59,6 +53,9 @@
   function fillModelOptions(models, selected) {
     state.models = models || [];
     const selects = [$("model-select"), $("setting-model")].filter(Boolean);
+    if (!state.models.length && selected) {
+      state.models = [{ id: selected, name: selected }];
+    }
     selects.forEach((select) => {
       select.innerHTML = "";
       state.models.forEach((model) => {
@@ -68,7 +65,11 @@
         select.appendChild(opt);
       });
     });
-    syncModelSelects(selected || state.settings.default_model);
+    const pick =
+      (selected && state.models.some((m) => m.id === selected) && selected) ||
+      state.models[0]?.id ||
+      state.settings.default_model;
+    syncModelSelects(pick);
     updateModelCapacityLabel();
   }
 
@@ -118,14 +119,19 @@
         select.appendChild(opt);
       });
     });
+    const firstConfigured = state.providers.find((p) => p.configured)?.id;
+    const isConfigured = (id) =>
+      Boolean(id && state.providers.find((p) => p.id === id && p.configured));
     const preferred =
-      selected ||
-      state.settings.default_provider ||
-      state.providers.find((p) => p.configured)?.id ||
+      (isConfigured(selected) && selected) ||
+      (isConfigured(state.settings.default_provider) && state.settings.default_provider) ||
+      firstConfigured ||
       "groq";
     selects.forEach((select) => {
       if ([...select.options].some((o) => o.value === preferred && !o.disabled)) {
         select.value = preferred;
+      } else if (firstConfigured) {
+        select.value = firstConfigured;
       }
     });
     const label = $("sidebar-provider-label");

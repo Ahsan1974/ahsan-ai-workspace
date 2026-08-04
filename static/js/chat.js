@@ -12,6 +12,19 @@
     "yml", "yaml", "cs", "js", "ts", "sql", "html", "css",
   ]);
 
+  function workspaceConfig() {
+    return global.__WORKSPACE__ || {};
+  }
+
+  function maxUploadBytes() {
+    const mb = Number(workspaceConfig().maxUploadMb);
+    return ((Number.isFinite(mb) && mb > 0 ? mb : 8) * 1024 * 1024);
+  }
+
+  function preferStream() {
+    return workspaceConfig().preferStream !== false;
+  }
+
   function cacheEls() {
     els.messages = document.getElementById("messages");
     els.emptyState = document.getElementById("empty-state");
@@ -134,24 +147,97 @@
     });
   }
 
-  function addFiles(fileList) {
+  function compressImageFile(file) {
+    return new Promise((resolve) => {
+      const maxBytes = Math.min(maxUploadBytes(), 1.8 * 1024 * 1024);
+      if (file.size <= maxBytes) {
+        resolve(file);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const maxDim = 1600;
+        let { width, height } = img;
+        const scale = Math.min(1, maxDim / Math.max(width, height));
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        let quality = 0.82;
+        const finish = (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const name = file.name.replace(/\.(png|jpeg|jpg)$/i, ".jpg");
+          resolve(new File([blob], name, { type: "image/jpeg" }));
+        };
+        const tryQuality = () => {
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size > maxBytes && quality > 0.45) {
+                quality -= 0.12;
+                tryQuality();
+                return;
+              }
+              finish(blob);
+            },
+            "image/jpeg",
+            quality
+          );
+        };
+        tryQuality();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      };
+      img.src = url;
+    });
+  }
+
+  async function addFiles(fileList) {
     const incoming = Array.from(fileList || []);
-    for (const file of incoming) {
+    const limit = maxUploadBytes();
+    const limitMb = Math.round(limit / (1024 * 1024));
+    for (const raw of incoming) {
       if (pendingFiles.length >= MAX_PENDING_FILES) {
         Notify.warning(`You can attach at most ${MAX_PENDING_FILES} files.`);
         break;
       }
-      const ext = fileExt(file.name);
+      const ext = fileExt(raw.name);
       if (!ALLOWED_EXT.has(ext)) {
-        Notify.error(`Unsupported file type: ${file.name}`);
+        Notify.error(`Unsupported file type: ${raw.name}`);
         continue;
       }
-      if (file.size > 8 * 1024 * 1024) {
-        Notify.error(`${file.name} is larger than 8 MB.`);
+      let file = raw;
+      if (["png", "jpg", "jpeg"].includes(ext)) {
+        try {
+          file = await compressImageFile(raw);
+        } catch {
+          file = raw;
+        }
+      }
+      if (file.size > limit) {
+        Notify.error(
+          `${raw.name} is larger than ${limitMb} MB` +
+            (workspaceConfig().hosted
+              ? " (hosting limit). Try a smaller PDF/image."
+              : ".")
+        );
         continue;
       }
       const item = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, file };
-      if (["png", "jpg", "jpeg"].includes(ext)) {
+      if (["png", "jpg", "jpeg"].includes(fileExt(file.name))) {
         item.previewUrl = URL.createObjectURL(file);
       }
       pendingFiles.push(item);
@@ -338,14 +424,15 @@
 
     try {
       const conversationId = await ensureConversation();
+      const useStream = preferStream();
       const form = new FormData();
       form.append("content", text);
       form.append("provider", provider);
       form.append("model", model);
-      form.append("stream", "true");
+      form.append("stream", useStream ? "true" : "false");
       filesToSend.forEach((file) => form.append("files", file, file.name));
 
-      const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+      let response = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
           Accept: "text/event-stream, application/json",
@@ -354,12 +441,82 @@
         signal: abortController.signal,
       });
 
-      const contentType = response.headers.get("content-type") || "";
-      if (!response.ok || !contentType.includes("text/event-stream")) {
+      // Retry once without streaming if SSE is rejected / unavailable (common on some hosts).
+      let contentType = response.headers.get("content-type") || "";
+      if (
+        useStream &&
+        response.ok &&
+        !contentType.includes("text/event-stream") &&
+        contentType.includes("application/json")
+      ) {
+        // Non-stream JSON success path handled below.
+      } else if (
+        useStream &&
+        (!response.ok || !contentType.includes("text/event-stream"))
+      ) {
+        const failedStatus = response.status;
+        if (failedStatus === 413) {
+          throw Object.assign(
+            new Error(
+              `Upload too large for the host (max ~${Number(workspaceConfig().maxUploadMb) || 3} MB).`
+            ),
+            { code: "ATTACHMENT_TOO_LARGE" }
+          );
+        }
+        // Fall back to non-streaming JSON for platform SSE issues.
+        const retryForm = new FormData();
+        retryForm.append("content", text);
+        retryForm.append("provider", provider);
+        retryForm.append("model", model);
+        retryForm.append("stream", "false");
+        filesToSend.forEach((file) => retryForm.append("files", file, file.name));
+        response = await fetch(`/api/conversations/${conversationId}/messages`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+          body: retryForm,
+          signal: abortController.signal,
+        });
+        contentType = response.headers.get("content-type") || "";
+      }
+
+      if (!response.ok) {
+        if (response.status === 413) {
+          throw Object.assign(
+            new Error(
+              `Upload too large for the host (max ~${Number(workspaceConfig().maxUploadMb) || 3} MB).`
+            ),
+            { code: "ATTACHMENT_TOO_LARGE" }
+          );
+        }
         const payload = await response.json().catch(() => null);
         throw Object.assign(new Error(payload?.error?.message || "Failed to send message"), {
           code: payload?.error?.code,
         });
+      }
+
+      if (!contentType.includes("text/event-stream")) {
+        const payload = await response.json().catch(() => null);
+        if (!payload?.success) {
+          throw Object.assign(new Error(payload?.error?.message || "Failed to send message"), {
+            code: payload?.error?.code,
+          });
+        }
+        const data = payload.data || {};
+        const streaming = document.getElementById("streaming-message");
+        if (streaming) streaming.remove();
+        if (data.user_message) currentMessages.push(data.user_message);
+        if (data.assistant_message) currentMessages.push(data.assistant_message);
+        renderMessages(currentMessages);
+        if (data.conversation) {
+          Sidebar.upsert(data.conversation);
+          if (els.title) els.title.textContent = data.conversation.title || "New Chat";
+        }
+        if (data.model_switched_for_vision && data.model) {
+          Notify.warning(`Switched this chat to ${data.model} for attachments.`);
+        }
+        global.App?.refreshTokenStrip?.();
+        global.App?.refreshConversations?.().catch(() => {});
+        return;
       }
 
       await API.consumeSSE(

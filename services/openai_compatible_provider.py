@@ -25,6 +25,7 @@ from services.base_provider import (
     UsageInfo,
 )
 from services.model_catalog import PROVIDER_MODEL_CATALOG
+from services.provider_keys import key_looks_real
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +76,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         self.last_usage: UsageInfo | None = None
 
     def is_configured(self) -> bool:
-        return bool(self._api_key) and self._api_key.lower() not in {
-            "put_your_key_here",
-            "changeme",
-        }
+        return key_looks_real(self._api_key)
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -360,6 +358,16 @@ def create_sambanova_provider(api_key: str, default_model: str) -> OpenAICompati
 
 
 def create_openrouter_provider(api_key: str, default_model: str) -> OpenAICompatibleProvider:
+    import os
+
+    vercel_url = (os.getenv("VERCEL_URL") or "").strip()
+    referer = (os.getenv("OPENROUTER_HTTP_REFERER") or "").strip()
+    if not referer:
+        if vercel_url:
+            referer = vercel_url if vercel_url.startswith("http") else f"https://{vercel_url}"
+        else:
+            referer = "http://127.0.0.1:5000"
+
     return OpenAICompatibleProvider(
         name="openrouter",
         display_name="OpenRouter",
@@ -367,7 +375,7 @@ def create_openrouter_provider(api_key: str, default_model: str) -> OpenAICompat
         base_url="https://openrouter.ai/api/v1",
         default_model=default_model or "openai/gpt-4o-mini",
         extra_headers={
-            "HTTP-Referer": "http://127.0.0.1:5000",
+            "HTTP-Referer": referer,
             "X-Title": "Ahsan AI Workspace",
         },
         catalog_only_when_large=True,

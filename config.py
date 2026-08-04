@@ -84,10 +84,19 @@ class Config:
     MAX_CONTEXT_MESSAGES = int(os.getenv("MAX_CONTEXT_MESSAGES", "80"))
     MAX_MESSAGE_CHARACTERS = int(os.getenv("MAX_MESSAGE_CHARACTERS", "20000"))
     MAX_IMPORT_SIZE_MB = int(os.getenv("MAX_IMPORT_SIZE_MB", "10"))
-    MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "20"))
+    # Vercel request body hard-limit is ~4.5MB — keep uploads under that.
+    _upload_default = "3" if running_on_vercel() else "20"
+    MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", _upload_default))
+    if running_on_vercel():
+        MAX_UPLOAD_SIZE_MB = min(MAX_UPLOAD_SIZE_MB, 3)
 
     DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
     DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "groq").strip().lower() or "groq"
+    # Streaming SSE is unreliable on many Vercel setups; prefer JSON responses there.
+    PREFER_STREAM = os.getenv(
+        "PREFER_STREAM",
+        "false" if running_on_vercel() else "true",
+    ).lower() in {"1", "true", "yes", "on"}
 
     # On Vercel, always use a writable /tmp SQLite file (unless a remote DB URL is set).
     if running_on_vercel():

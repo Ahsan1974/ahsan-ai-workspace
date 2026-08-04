@@ -23,6 +23,7 @@ from services.base_provider import (
     UsageInfo,
 )
 from services.model_catalog import PROVIDER_MODEL_CATALOG
+from services.provider_keys import key_looks_real
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class CohereProvider(BaseLLMProvider):
         self.last_usage: UsageInfo | None = None
 
     def is_configured(self) -> bool:
-        return bool(self._api_key)
+        return key_looks_real(self._api_key)
 
     def _headers(self) -> dict[str, str]:
         return {

@@ -11,6 +11,8 @@ from typing import Any
 
 from werkzeug.datastructures import FileStorage
 
+from config import running_on_vercel
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {
@@ -92,7 +94,8 @@ CODE_PREFERRED: dict[str, str] = {
 }
 
 MAX_FILES = 5
-MAX_FILE_BYTES = 8 * 1024 * 1024  # 8 MB per file
+# Vercel caps request bodies around 4.5MB; stay safely under that when hosted.
+MAX_FILE_BYTES = (3 * 1024 * 1024) if running_on_vercel() else (8 * 1024 * 1024)
 MAX_TEXT_CHARS = 48000
 MAX_PDF_CHARS = 40000
 MAX_PDF_PAGES = 40
@@ -261,6 +264,24 @@ def process_uploads(files: list[FileStorage]) -> AttachmentBundle:
         if ext in IMAGE_EXTENSIONS:
             if mime not in {"image/png", "image/jpeg", "image/jpg"}:
                 mime = "image/png" if ext == ".png" else "image/jpeg"
+            # Groq vision rejects images smaller than 2x2.
+            try:
+                from PIL import Image as PILImage
+            except ImportError:
+                PILImage = None  # type: ignore[misc, assignment]
+            if PILImage is not None:
+                try:
+                    with PILImage.open(BytesIO(data)) as img:
+                        width, height = img.size
+                    if width < 2 or height < 2:
+                        raise AttachmentError(
+                            "INVALID_ATTACHMENT",
+                            f"Image '{filename}' is too small ({width}x{height}). Use at least 2x2 pixels.",
+                        )
+                except AttachmentError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    pass
             encoded = base64.b64encode(data).decode("ascii")
             bundle.attachments.append(
                 ProcessedAttachment(

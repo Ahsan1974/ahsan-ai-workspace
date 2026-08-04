@@ -27,12 +27,13 @@ def test_process_java_file():
 
 
 def test_process_png_image_builds_data_url():
-    # Minimal 1x1 PNG
-    png = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
-        b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
+    # Minimal 2x2 PNG (Groq vision rejects 1x1 images).
+    from PIL import Image
+    from io import BytesIO
+
+    buf = BytesIO()
+    Image.new("RGB", (2, 2), color=(10, 20, 30)).save(buf, format="PNG")
+    png = buf.getvalue()
     upload = FileStorage(stream=BytesIO(png), filename="dot.png", content_type="image/png")
     bundle = process_uploads([upload])
     assert bundle.has_images

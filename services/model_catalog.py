@@ -33,6 +33,8 @@ PROVIDER_MODEL_CATALOG: dict[str, list[dict[str, Any]]] = {
     "gemini": [
         {"id": "gemini-2.0-flash", "name": "gemini-2.0-flash", "context_window": 1048576, "max_output_tokens": 8192, "supports_vision": True},
         {"id": "gemini-2.0-flash-lite", "name": "gemini-2.0-flash-lite", "context_window": 1048576, "max_output_tokens": 8192, "supports_vision": True},
+        {"id": "gemini-2.5-flash", "name": "gemini-2.5-flash", "context_window": 1048576, "max_output_tokens": 8192, "supports_vision": True},
+        {"id": "gemini-2.5-pro", "name": "gemini-2.5-pro", "context_window": 1048576, "max_output_tokens": 8192, "supports_vision": True},
         {"id": "gemini-1.5-flash", "name": "gemini-1.5-flash", "context_window": 1048576, "max_output_tokens": 8192, "supports_vision": True},
         {"id": "gemini-1.5-pro", "name": "gemini-1.5-pro", "context_window": 2097152, "max_output_tokens": 8192, "supports_vision": True},
     ],

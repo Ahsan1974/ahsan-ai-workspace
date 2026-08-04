@@ -23,6 +23,7 @@ from services.base_provider import (
     UsageInfo,
 )
 from services.model_catalog import PROVIDER_MODEL_CATALOG
+from services.provider_keys import key_looks_real
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class GeminiProvider(BaseLLMProvider):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     def is_configured(self) -> bool:
-        return bool(self._api_key)
+        return key_looks_real(self._api_key)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -95,11 +96,17 @@ class GeminiProvider(BaseLLMProvider):
                 )
             if not models:
                 models = catalog
-            # Keep the list usable: prefer known chat models from our catalog.
+            # Keep the list usable: prefer known chat models from our catalog,
+            # then fill with other live generateContent gemini models.
             catalog_ids = {m.id for m in catalog}
             preferred = [m for m in models if m.id in catalog_ids]
-            models = preferred or [m for m in models if "gemini" in m.id.lower()][:8] or catalog
-            models.sort(key=lambda m: m.id.lower())
+            extras = [m for m in models if m.id not in catalog_ids and "gemini" in m.id.lower()]
+            for item in preferred:
+                item.supports_vision = True
+            for item in extras:
+                item.supports_vision = True
+            models = (preferred + extras[:10]) or catalog
+            models.sort(key=lambda m: (0 if m.id in catalog_ids else 1, m.id.lower()))
             self._models_cache = models
             self._models_cache_at = now
             return list(models)

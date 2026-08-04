@@ -22,6 +22,8 @@ from services.base_provider import (
     RateLimitError,
 )
 
+from services.provider_keys import key_looks_real
+
 logger = logging.getLogger(__name__)
 
 # Models with these tokens in the id are usually not useful for text chat.
@@ -55,15 +57,7 @@ class GroqProvider(BaseLLMProvider):
         self.last_usage = None
 
     def is_configured(self) -> bool:
-        if not self._api_key:
-            return False
-        # Treat example placeholders as missing so the UI banner stays accurate.
-        placeholders = {
-            "put_your_new_groq_api_key_here",
-            "your_api_key_here",
-            "changeme",
-        }
-        return self._api_key.lower() not in placeholders
+        return key_looks_real(self._api_key)
 
     def _get_client(self) -> Groq:
         if not self.is_configured():
@@ -87,16 +81,23 @@ class GroqProvider(BaseLLMProvider):
         try:
             response = client.models.list()
             data = getattr(response, "data", None) or []
+            from services.attachment_service import supports_vision
+            from services.model_catalog import get_catalog_entry
+
             models: list[ModelInfo] = []
             for item in data:
                 model_id = getattr(item, "id", None) or ""
                 if not model_id or not self._is_chat_model(model_id):
                     continue
+                entry = get_catalog_entry("groq", model_id) or {}
                 models.append(
                     ModelInfo(
                         id=model_id,
-                        name=model_id,
+                        name=entry.get("name") or model_id,
                         owned_by=getattr(item, "owned_by", None),
+                        context_window=entry.get("context_window"),
+                        max_output_tokens=entry.get("max_output_tokens"),
+                        supports_vision=bool(entry.get("supports_vision")) or supports_vision(model_id),
                     )
                 )
             models.sort(key=lambda m: m.id.lower())
@@ -230,16 +231,35 @@ class GroqProvider(BaseLLMProvider):
         if isinstance(exc, APIConnectionError):
             return NetworkUnavailableError()
         if isinstance(exc, APIStatusError):
+            detail = ""
+            try:
+                body = getattr(exc, "body", None)
+                if isinstance(body, dict):
+                    err = body.get("error") or {}
+                    detail = str(err.get("message") or body)[:280]
+                elif body:
+                    detail = str(body)[:280]
+            except Exception:  # noqa: BLE001
+                detail = ""
+            if not detail:
+                detail = str(exc)[:280]
             if status in {401, 403} or "invalid api key" in message or "unauthorized" in message:
                 return InvalidAPIKeyError()
             if status == 404 or "model" in message and ("not found" in message or "does not exist" in message):
                 return ModelUnavailableError(model)
-            if status == 400 and "model" in message:
+            if status == 400 and ("model" in message or "does not exist" in message):
                 return InvalidModelError(model)
             if status == 429:
                 return RateLimitError()
-            logger.error("Groq APIStatusError status=%s type=%s", status, type(exc).__name__)
-            return NetworkUnavailableError()
+            logger.error("Groq APIStatusError status=%s: %s", status, detail[:200])
+            if status and status >= 400:
+                from services.base_provider import ProviderError
+
+                return ProviderError(
+                    "PROVIDER_ERROR",
+                    detail or f"Groq rejected the request (HTTP {status}).",
+                )
+            return NetworkUnavailableError(detail or None)
 
         if "timeout" in message:
             return APITimeoutError()
