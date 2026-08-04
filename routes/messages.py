@@ -276,11 +276,13 @@ def send_message(conversation_id: int):
                 max_tokens=max_tokens,
                 system_prompt=system_prompt,
             )
-            UsageService.record_from_provider(
+            usage = UsageService.record_from_provider(
                 provider,
                 provider_id=provider_id,
                 model=model,
                 conversation_id=conversation.id,
+                messages=provider_history,
+                completion_text=assistant_text,
             )
             assistant_message = ConversationService.add_message(
                 conversation_id=conversation.id,
@@ -299,6 +301,8 @@ def send_message(conversation_id: int):
                     "model": model,
                     "attachments": attachment_meta,
                     "recreated": recreated,
+                    "usage": usage,
+                    "provider": provider_id,
                 }
             )
 
@@ -340,11 +344,13 @@ def send_message(conversation_id: int):
                     )
                     return
 
-                UsageService.record_from_provider(
+                usage = UsageService.record_from_provider(
                     provider,
                     provider_id=provider_id,
                     model=model,
                     conversation_id=conversation.id,
+                    messages=provider_history,
+                    completion_text=full_text,
                 )
                 assistant_message = ConversationService.add_message(
                     conversation_id=conversation.id,
@@ -359,6 +365,8 @@ def send_message(conversation_id: int):
                     {
                         "assistant_message": assistant_message.to_dict(),
                         "conversation": refreshed.to_dict(),
+                        "usage": usage,
+                        "provider": provider_id,
                     },
                 )
             except ProviderError as exc:

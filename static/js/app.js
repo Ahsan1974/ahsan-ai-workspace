@@ -82,26 +82,59 @@
     return Number(n).toLocaleString();
   }
 
+  function applyTokenStrip(total, remaining) {
+    const totalEl = $("stat-total-tokens");
+    const leftEl = $("stat-left-tokens");
+    if (!totalEl || !leftEl) return;
+    totalEl.textContent = formatCount(total);
+    leftEl.textContent = remaining != null ? formatCount(remaining) : "—";
+  }
+
+  function refreshTokenStripFromLocal(provider) {
+    const local = globalThis.UsageStore?.todayFor?.(provider);
+    if (!local) return false;
+    applyTokenStrip(local.total_tokens, local.remaining);
+    return true;
+  }
+
   async function refreshTokenStrip() {
     const provider = $("provider-select")?.value || state.settings.default_provider || "groq";
     const totalEl = $("stat-total-tokens");
     const leftEl = $("stat-left-tokens");
     if (!totalEl || !leftEl) return;
+
+    const local = globalThis.UsageStore?.todayFor?.(provider) || {
+      total_tokens: 0,
+      remaining: globalThis.UsageStore?.limits?.()?.[provider] ?? null,
+      limit: globalThis.UsageStore?.limits?.()?.[provider] ?? null,
+    };
+    // Show browser totals immediately (works on Vercel when server DB is empty).
+    applyTokenStrip(local.total_tokens, local.remaining);
+
     try {
       const payload = await API.get("/api/dashboard/usage");
       const rows = payload.data?.today?.by_provider || [];
       const row = rows.find((r) => r.provider === provider);
-      if (!row) {
-        const limits = payload.data?.limits || {};
-        totalEl.textContent = "0";
-        leftEl.textContent = formatCount(limits[provider] ?? null);
-        return;
-      }
-      totalEl.textContent = formatCount(row.total_tokens);
-      leftEl.textContent = row.remaining != null ? formatCount(row.remaining) : "—";
+      const serverTotal = Number(row?.total_tokens) || 0;
+      const limits = payload.data?.limits || globalThis.UsageStore?.limits?.() || {};
+      const limit = Number(limits[provider] ?? local.limit) || null;
+      // Prefer the higher of local ledger vs server (server is often wiped on Vercel).
+      const total = Math.max(local.total_tokens || 0, serverTotal);
+      const remaining = limit != null ? Math.max(0, limit - total) : row?.remaining ?? local.remaining;
+      applyTokenStrip(total, remaining);
     } catch {
-      /* keep previous values */
+      refreshTokenStripFromLocal(provider);
     }
+  }
+
+  function recordUsage(provider, usage) {
+    if (!usage || !globalThis.UsageStore) return;
+    const pid = provider || $("provider-select")?.value || state.settings.default_provider || "groq";
+    globalThis.UsageStore.add(pid, usage.total_tokens, {
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+    });
+    refreshTokenStripFromLocal(pid);
   }
 
   function fillProviderOptions(providers, selected) {
@@ -369,18 +402,23 @@
       );
       if (!ok) return;
     }
+    let message = "Conversation deleted.";
     try {
       await API.del(`/api/conversations/${id}`);
-      Sidebar.remove(id);
-      if (state.activeConversationId === id) {
-        state.activeConversationId = null;
-        Chat.setTitle("New Chat");
-        Chat.clearMessages();
-      }
-      Notify.success("Conversation deleted.");
     } catch (err) {
-      Notify.error(err.message || "Unable to delete conversation.");
+      // Chat may only exist in this browser (Vercel ephemeral DB).
+      if (err?.code !== "CONVERSATION_NOT_FOUND" && err?.status !== 404) {
+        message = "Removed from this browser (server delete failed).";
+      }
     }
+    globalThis.ChatStore?.remove?.(id);
+    Sidebar.remove(id);
+    if (Number(state.activeConversationId) === Number(id)) {
+      state.activeConversationId = null;
+      Chat.setTitle("New Chat");
+      Chat.clearMessages();
+    }
+    Notify.success(message);
   }
 
   function openMobileSidebar() {
@@ -480,6 +518,7 @@
           Sidebar.upsert(payload.data);
         }
         Notify.success(`Switched this chat to ${meta.name}. Other chats are unchanged.`);
+        await refreshTokenStrip();
       } catch (err) {
         Notify.error(err.message || "Unable to switch provider.");
       }
@@ -505,6 +544,7 @@
     fillProviderOptions,
     getProviders: () => state.providers,
     refreshTokenStrip,
+    recordUsage,
   };
 
   async function init() {

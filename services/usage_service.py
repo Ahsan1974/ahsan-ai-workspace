@@ -49,12 +49,57 @@ class UsageService:
             return None
 
     @staticmethod
-    def record_from_provider(provider_obj, *, provider_id: str, model: str, conversation_id: int | None) -> None:
+    def estimate_tokens_from_text(text: str) -> int:
+        if not text:
+            return 0
+        return max(1, len(text) // 4)
+
+    @staticmethod
+    def estimate_from_exchange(messages: list | None, completion_text: str) -> dict[str, int]:
+        prompt_chars = 0
+        for item in messages or []:
+            content = (item or {}).get("content", "")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        prompt_chars += len(str(part.get("text") or ""))
+                    elif isinstance(part, dict) and part.get("type") == "image_url":
+                        prompt_chars += 3200  # rough vision cost
+            else:
+                prompt_chars += len(str(content or ""))
+        prompt_tokens = max(1, prompt_chars // 4) if prompt_chars else 0
+        completion_tokens = UsageService.estimate_tokens_from_text(completion_text or "")
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+
+    @staticmethod
+    def record_from_provider(
+        provider_obj,
+        *,
+        provider_id: str,
+        model: str,
+        conversation_id: int | None,
+        messages: list | None = None,
+        completion_text: str = "",
+    ) -> dict[str, int]:
         usage = getattr(provider_obj, "last_usage", None)
-        if usage is None:
-            return
-        data = usage.normalized() if hasattr(usage, "normalized") else usage
-        UsageService.record(
+    if (usage is not None):
+            if hasattr(usage, "normalized"):
+                data = usage.normalized()
+            elif isinstance(usage, dict):
+                data = usage
+            else:
+                data = {
+                    "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                    "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                    "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                }
+        else:
+            data = UsageService.estimate_from_exchange(messages, completion_text)
+        recorded = UsageService.record(
             provider=provider_id,
             model=model,
             prompt_tokens=data.get("prompt_tokens", 0),
@@ -62,6 +107,14 @@ class UsageService:
             total_tokens=data.get("total_tokens", 0),
             conversation_id=conversation_id,
         )
+        payload = {
+            "prompt_tokens": int(data.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(data.get("completion_tokens", 0) or 0),
+            "total_tokens": int(data.get("total_tokens", 0) or 0),
+            "estimated": usage is None,
+            "recorded": recorded is not None,
+        }
+        return payload
 
     @staticmethod
     def _today_start() -> datetime:

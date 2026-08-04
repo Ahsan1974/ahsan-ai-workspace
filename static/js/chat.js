@@ -582,7 +582,11 @@
         if (data.model_switched_for_vision && data.model) {
           Notify.warning(`Switched this chat to ${data.model} for attachments.`);
         }
-        global.App?.refreshTokenStrip?.();
+        if (data.usage) {
+          global.App?.recordUsage?.(data.provider || document.getElementById("provider-select")?.value, data.usage);
+        } else {
+          global.App?.refreshTokenStrip?.();
+        }
         global.App?.refreshConversations?.().catch(() => {});
         return;
       }
@@ -647,7 +651,11 @@
               if (els.title) els.title.textContent = data.conversation.title || "New Chat";
               global.ChatStore?.save?.(data.conversation, currentMessages);
             }
-            global.App?.refreshTokenStrip?.();
+            if (data.usage) {
+              global.App?.recordUsage?.(data.provider || document.getElementById("provider-select")?.value, data.usage);
+            } else {
+              global.App?.refreshTokenStrip?.();
+            }
             global.App?.refreshConversations?.().catch(() => {});
           },
           error: (data) => {

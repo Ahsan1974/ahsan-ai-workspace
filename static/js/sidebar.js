@@ -36,17 +36,32 @@
     el.title = "Approximate stored chat text size. Delete large chats to free space.";
   }
 
+  function remove(id) {
+    const nid = Number(id);
+    state.conversations = state.conversations.filter((c) => Number(c.id) !== nid);
+    if (Number(state.activeId) === nid) state.activeId = null;
+    global.ChatStore?.remove?.(id);
+    render();
+    updateStorageFooterFromList();
+  }
+
   async function refreshStorageFooter() {
     const el = document.getElementById("storage-usage-label");
     if (!el) return;
+    const localBytes = state.conversations.reduce(
+      (sum, item) => sum + (Number(item.storage_bytes) || 0),
+      0
+    );
     updateStorageFooterFromList();
     try {
       const payload = await API.get("/api/storage");
       const data = payload.data || {};
-      const chat = formatBytes(data.total_chat_bytes || 0);
+      const serverChat = Number(data.total_chat_bytes) || 0;
+      // On Vercel server DB is often empty — never overwrite real local chat size with 0.
+      const chatBytes = Math.max(localBytes, serverChat);
       const db = formatBytes(data.database_bytes || 0);
-      el.textContent = `Storage: ${chat} chats · ${db} DB`;
-      el.title = "Approximate chat text size and SQLite database file size";
+      el.textContent = `Storage: ${formatBytes(chatBytes)} chats · ${db} DB`;
+      el.title = "Approximate chat text size (browser + server) and database file size";
     } catch {
       updateStorageFooterFromList();
     }
@@ -85,7 +100,7 @@
 
     items.forEach((conversation) => {
       const card = document.createElement("div");
-      card.className = `conversation-item${conversation.id === state.activeId ? " active" : ""}`;
+      card.className = `conversation-item${Number(conversation.id) === Number(state.activeId) ? " active" : ""}`;
       const sizeLabel = formatBytes(conversation.storage_bytes || 0);
       card.innerHTML = `
         <div class="title">${escapeHtml(conversation.title || "New Chat")}</div>
@@ -223,14 +238,6 @@
     state.conversations.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
     const current = state.conversations.find((c) => c.id === conversation.id);
     global.ChatStore?.save?.(current || conversation, current?.messages || conversation.messages);
-    render();
-    refreshStorageFooter().catch(() => {});
-  }
-
-  function remove(id) {
-    state.conversations = state.conversations.filter((c) => c.id !== id);
-    if (state.activeId === id) state.activeId = null;
-    global.ChatStore?.remove?.(id);
     render();
     refreshStorageFooter().catch(() => {});
   }
