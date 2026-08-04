@@ -178,8 +178,32 @@
     const url = state.search
       ? `/api/conversations?search=${encodeURIComponent(state.search)}`
       : "/api/conversations";
-    const payload = await API.get(url);
-    state.conversations = payload.data || [];
+    let serverItems = [];
+    try {
+      const payload = await API.get(url);
+      serverItems = payload.data || [];
+    } catch {
+      serverItems = [];
+    }
+
+    const localItems = global.ChatStore?.list?.() || [];
+    const byId = new Map();
+    localItems.forEach((item) => {
+      if (item?.id != null) byId.set(Number(item.id), { ...item });
+    });
+    serverItems.forEach((item) => {
+      const local = byId.get(Number(item.id));
+      byId.set(Number(item.id), local ? { ...local, ...item, messages: item.messages || local.messages } : item);
+      global.ChatStore?.save?.(item, local?.messages);
+    });
+
+    let merged = Array.from(byId.values());
+    const term = (state.search || "").trim().toLowerCase();
+    if (term) {
+      merged = merged.filter((c) => (c.title || "").toLowerCase().includes(term));
+    }
+    merged.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+    state.conversations = merged;
     render();
     updateStorageFooterFromList();
     refreshStorageFooter().catch(() => {});
@@ -197,6 +221,8 @@
     if (idx >= 0) state.conversations[idx] = { ...state.conversations[idx], ...conversation };
     else state.conversations.unshift(conversation);
     state.conversations.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+    const current = state.conversations.find((c) => c.id === conversation.id);
+    global.ChatStore?.save?.(current || conversation, current?.messages || conversation.messages);
     render();
     refreshStorageFooter().catch(() => {});
   }
@@ -204,6 +230,7 @@
   function remove(id) {
     state.conversations = state.conversations.filter((c) => c.id !== id);
     if (state.activeId === id) state.activeId = null;
+    global.ChatStore?.remove?.(id);
     render();
     refreshStorageFooter().catch(() => {});
   }

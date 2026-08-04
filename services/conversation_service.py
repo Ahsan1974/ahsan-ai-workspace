@@ -77,6 +77,39 @@ class ConversationService:
             raise ServiceError("DATABASE_ERROR", "Unable to create conversation.", 500) from exc
 
     @staticmethod
+    def create_conversation_with_history(
+        *,
+        provider: str,
+        model: str,
+        title: str = "New Chat",
+        messages: list[dict[str, Any]] | None = None,
+    ) -> Conversation:
+        """Create a chat and seed prior turns (used when serverless DB instances diverge)."""
+        conversation = ConversationService.create_conversation(
+            provider=provider,
+            model=model,
+            title=title,
+        )
+        seeded = 0
+        for item in messages or []:
+            role = str((item or {}).get("role") or "").strip()
+            content = str((item or {}).get("content") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            ConversationService.add_message(
+                conversation_id=conversation.id,
+                role=role,
+                content=content,
+                provider=str((item or {}).get("provider") or provider or "") or None,
+                model=str((item or {}).get("model") or model or "") or None,
+                auto_title=False,
+            )
+            seeded += 1
+            if seeded >= 80:
+                break
+        return ConversationService.get_conversation(conversation.id)
+
+    @staticmethod
     def update_conversation(conversation_id: int, **fields: Any) -> Conversation:
         conversation = ConversationService.get_conversation(conversation_id)
         if "title" in fields and fields["title"] is not None:

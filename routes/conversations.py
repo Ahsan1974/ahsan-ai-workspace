@@ -43,12 +43,21 @@ def create_conversation():
     provider = payload.get("provider") or settings.get("default_provider") or "groq"
     model = payload.get("model") or settings.get("default_model") or ""
     title = payload.get("title") or "New Chat"
+    history = payload.get("messages")
     try:
-        conversation = ConversationService.create_conversation(
-            provider=provider,
-            model=model,
-            title=title,
-        )
+        if isinstance(history, list) and history:
+            conversation = ConversationService.create_conversation_with_history(
+                provider=provider,
+                model=model,
+                title=title,
+                messages=history,
+            )
+        else:
+            conversation = ConversationService.create_conversation(
+                provider=provider,
+                model=model,
+                title=title,
+            )
         return success_response(conversation.to_dict(include_messages=True), 201)
     except ServiceError as exc:
         return error_response(exc.code, exc.message, exc.status_code)

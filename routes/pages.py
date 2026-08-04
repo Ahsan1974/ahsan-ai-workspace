@@ -16,5 +16,6 @@ def index():
             "hosted": running_on_vercel(),
             "preferStream": bool(current_app.config.get("PREFER_STREAM", True)),
             "maxUploadMb": int(current_app.config.get("MAX_UPLOAD_SIZE_MB", 8)),
+            "durableDatabase": bool(current_app.config.get("DURABLE_DATABASE", False)),
         },
     )

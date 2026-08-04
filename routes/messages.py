@@ -39,7 +39,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _parse_send_request() -> tuple[str, str, str, bool, list]:
+def _parse_send_request() -> tuple[str, str, str, bool, list, list[dict]]:
     """Parse JSON or multipart message requests."""
     files = []
     if request.files:
@@ -51,16 +51,63 @@ def _parse_send_request() -> tuple[str, str, str, bool, list]:
         model = request.form.get("model", "")
         stream_raw = request.form.get("stream", "true")
         stream = str(stream_raw).lower() in {"1", "true", "yes", "on"}
-        return content, provider, model, stream, files
+        history = _parse_client_history(request.form.get("client_history"))
+        return content, provider, model, stream, files, history
 
     payload = request.get_json(silent=True) or {}
+    history = payload.get("client_history")
+    if not isinstance(history, list):
+        history = _parse_client_history(history)
     return (
         payload.get("content", ""),
         payload.get("provider", ""),
         payload.get("model", ""),
         bool(payload.get("stream", True)),
         [],
+        history,
     )
+
+
+def _parse_client_history(raw: Any) -> list[dict]:
+    """Browser-sent prior turns used when serverless SQLite has no shared history."""
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        items = parsed if isinstance(parsed, list) else []
+    else:
+        return []
+
+    cleaned: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        cleaned.append({"role": role, "content": content})
+        if len(cleaned) >= 80:
+            break
+    return cleaned
+
+
+def _merge_context_history(
+    db_history: list[dict[str, str]],
+    client_history: list[dict],
+    context_limit: int,
+) -> list[dict[str, str]]:
+    """Prefer DB history when rich enough; otherwise use browser-sent history."""
+    if len(db_history) > 1 or not client_history:
+        history = db_history
+    else:
+        history = [{"role": m["role"], "content": m["content"]} for m in client_history]
+    if context_limit > 0 and len(history) > context_limit:
+        history = history[-context_limit:]
+    return history
 
 
 def _prepare_user_payload(raw_content: str, files: list, provider_id: str, model: str) -> tuple[str, Any, AttachmentBundle, str | None]:
@@ -113,18 +160,38 @@ def _history_with_provider_content(
 
 @messages_bp.post("/conversations/<int:conversation_id>/messages")
 def send_message(conversation_id: int):
-    raw_content, provider_in, model_in, stream, files = _parse_send_request()
+    raw_content, provider_in, model_in, stream, files, client_history = _parse_send_request()
     # Hosted serverless often breaks SSE; prefer reliable JSON completions there.
     if not current_app.config.get("PREFER_STREAM", True):
         stream = False
 
     settings = SettingsService.get_all()
+    provider_id = provider_in or settings.get("default_provider") or "groq"
+    requested_model = model_in or settings.get("default_model") or ""
+
+    # If this serverless instance lost the chat row, recreate it from browser history.
+    recreated = False
     try:
         conversation = ConversationService.get_conversation(conversation_id)
     except ServiceError as exc:
-        return error_response(exc.code, exc.message, exc.status_code)
+        if exc.code != "CONVERSATION_NOT_FOUND":
+            return error_response(exc.code, exc.message, exc.status_code)
+        title = "New Chat"
+        if client_history:
+            first_user = next((m for m in client_history if m.get("role") == "user"), None)
+            if first_user:
+                from services.conversation_service import make_title_from_message
 
-    # Prefer this chat's provider/model so other chats never bleed in.
+                title = make_title_from_message(str(first_user.get("content") or ""))
+        conversation = ConversationService.create_conversation_with_history(
+            provider=provider_id,
+            model=requested_model,
+            title=title,
+            messages=client_history,
+        )
+        recreated = True
+        conversation_id = conversation.id
+
     provider_id = (
         provider_in
         or conversation.provider
@@ -173,8 +240,8 @@ def send_message(conversation_id: int):
 
         provider = get_provider(provider_id)
         context_limit = int(settings.get("context_messages") or current_app.config["MAX_CONTEXT_MESSAGES"])
-        # Only messages from this conversation_id are included.
-        history = ConversationService.get_context_messages(conversation.id, context_limit)
+        db_history = ConversationService.get_context_messages(conversation.id, context_limit)
+        history = _merge_context_history(db_history, client_history, context_limit)
         provider_history = _history_with_provider_content(history, provider_content)
         temperature = float(settings.get("temperature", 0.7))
         max_tokens = int(settings.get("max_tokens", 4096))
@@ -222,6 +289,7 @@ def send_message(conversation_id: int):
                 provider=provider_id,
                 model=model,
             )
+            conversation = ConversationService.get_conversation(conversation.id)
             return success_response(
                 {
                     "user_message": user_message.to_dict(),
@@ -230,6 +298,7 @@ def send_message(conversation_id: int):
                     "model_switched_for_vision": switched_vision,
                     "model": model,
                     "attachments": attachment_meta,
+                    "recreated": recreated,
                 }
             )
 
@@ -245,6 +314,7 @@ def send_message(conversation_id: int):
                     "model_switched_for_vision": switched_vision,
                     "attachments": attachment_meta,
                     "context_window": None,
+                    "recreated": recreated,
                 },
             )
             collected: list[str] = []

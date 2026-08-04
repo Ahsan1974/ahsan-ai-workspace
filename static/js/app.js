@@ -211,44 +211,94 @@
     return conversations;
   }
 
+  function guardBusyAction() {
+    if (!Chat.isGenerating()) return true;
+    if (!Chat.hasActiveRequest?.()) {
+      Chat.forceIdle?.();
+      return true;
+    }
+    Notify.warning("Wait for the current response to finish, or press Stop.");
+    return false;
+  }
+
   async function openConversation(id) {
-    if (Chat.isGenerating()) {
-      Notify.warning("Wait for the current response to finish, or press Stop.");
+    if (!guardBusyAction()) return;
+    try {
+      const payload = await API.get(`/api/conversations/${id}`);
+      const conversation = payload.data;
+      state.activeConversationId = conversation.id;
+      Sidebar.setActive(conversation.id);
+      Chat.setTitle(conversation.title);
+      Chat.renderMessages(conversation.messages || []);
+      global.ChatStore?.save?.(conversation, conversation.messages || []);
+      const provider = conversation.provider || state.settings.default_provider || "groq";
+      const providerSelect = $("provider-select");
+      if (providerSelect) providerSelect.value = provider;
+      await loadModels(provider, conversation.model || undefined);
+      if (conversation.model) syncModelSelects(conversation.model);
+      updateModelCapacityLabel();
+      closeMobileSidebar();
+      return;
+    } catch (err) {
+      if (err.code !== "CONVERSATION_NOT_FOUND") {
+        Notify.error(err.message || "Unable to open conversation.");
+        return;
+      }
+    }
+
+    // Restore from browser cache and re-create on the server.
+    const cached = ChatStore?.get?.(id);
+    if (!cached) {
+      Notify.error("Conversation not found.");
+      Sidebar.remove(id);
       return;
     }
-    const payload = await API.get(`/api/conversations/${id}`);
-    const conversation = payload.data;
-    state.activeConversationId = conversation.id;
-    Sidebar.setActive(conversation.id);
-    Chat.setTitle(conversation.title);
-    Chat.renderMessages(conversation.messages || []);
-    // Restore this chat's own provider/model only — never overwrite global defaults.
-    const provider = conversation.provider || state.settings.default_provider || "groq";
-    const providerSelect = $("provider-select");
-    if (providerSelect) providerSelect.value = provider;
-    await loadModels(provider, conversation.model || undefined);
-    if (conversation.model) syncModelSelects(conversation.model);
-    updateModelCapacityLabel();
-    closeMobileSidebar();
+    try {
+      const restored = await API.post("/api/conversations", {
+        title: cached.title || "New Chat",
+        provider: cached.provider || $("provider-select")?.value || "groq",
+        model: cached.model || $("model-select")?.value || "",
+        messages: cached.messages || [],
+      });
+      const conversation = restored.data;
+      ChatStore.remove(id);
+      ChatStore.save(conversation, conversation.messages || cached.messages || []);
+      Sidebar.remove(id);
+      Sidebar.upsert(conversation);
+      state.activeConversationId = conversation.id;
+      Sidebar.setActive(conversation.id);
+      Chat.setTitle(conversation.title);
+      Chat.renderMessages(conversation.messages || cached.messages || []);
+      const provider = conversation.provider || "groq";
+      const providerSelect = $("provider-select");
+      if (providerSelect) providerSelect.value = provider;
+      await loadModels(provider, conversation.model || undefined);
+      if (conversation.model) syncModelSelects(conversation.model);
+      closeMobileSidebar();
+      Notify.success("Chat restored on this server.");
+    } catch (err) {
+      // Offline-ish fallback: show cached messages locally.
+      state.activeConversationId = null;
+      Sidebar.setActive(null);
+      Chat.setTitle(cached.title || "New Chat");
+      Chat.renderMessages(cached.messages || []);
+      Notify.warning(err.message || "Opened cached chat. Send a message to re-sync.");
+    }
   }
 
   async function reloadActiveConversation() {
     if (!state.activeConversationId) {
-      Chat.clearMessages();
       return;
     }
     try {
       await openConversation(state.activeConversationId);
     } catch {
-      Chat.clearMessages();
+      /* keep current UI */
     }
   }
 
   async function createNewChat() {
-    if (Chat.isGenerating()) {
-      Notify.warning("Wait for the current response to finish, or press Stop.");
-      return;
-    }
+    if (!guardBusyAction()) return;
     const payload = await API.post("/api/conversations", {
       provider: $("provider-select")?.value || "groq",
       model: $("model-select")?.value || state.settings.default_model || "",
@@ -462,6 +512,13 @@
     SettingsUI.bind();
     DashboardUI.bind();
     bindShell();
+
+    const banner = $("ephemeral-db-banner");
+    if (banner) {
+      const hosted = Boolean(window.__WORKSPACE__?.hosted);
+      const durable = Boolean(window.__WORKSPACE__?.durableDatabase);
+      banner.hidden = !(hosted && !durable);
+    }
 
     try {
       await loadSettings();

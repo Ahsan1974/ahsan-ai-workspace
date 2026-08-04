@@ -50,11 +50,21 @@ class Config:
 
     APP_NAME = APP_NAME
     SECRET_KEY = os.getenv("SECRET_KEY", "replace-with-a-random-local-secret")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{INSTANCE_DIR / 'personal_ai_workspace.db'}",
-    )
+    _raw_database_url = (os.getenv("DATABASE_URL") or "").strip()
+    SQLALCHEMY_DATABASE_URI = _raw_database_url or f"sqlite:///{INSTANCE_DIR / 'personal_ai_workspace.db'}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Neon / Heroku style URLs often use postgres:// — SQLAlchemy needs postgresql://
+    if SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
+        SQLALCHEMY_DATABASE_URI = "postgresql://" + SQLALCHEMY_DATABASE_URI[len("postgres://") :]
+    if SQLALCHEMY_DATABASE_URI.startswith("postgresql://"):
+        SQLALCHEMY_DATABASE_URI = (
+            "postgresql+psycopg://" + SQLALCHEMY_DATABASE_URI[len("postgresql://") :]
+        )
+    SQLALCHEMY_ENGINE_OPTIONS = (
+        {"pool_pre_ping": True, "pool_recycle": 280}
+        if SQLALCHEMY_DATABASE_URI.startswith(("postgresql+psycopg://", "mysql://"))
+        else {}
+    )
 
     FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
     FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
@@ -98,16 +108,24 @@ class Config:
         "false" if running_on_vercel() else "true",
     ).lower() in {"1", "true", "yes", "on"}
 
-    # On Vercel, always use a writable /tmp SQLite file (unless a remote DB URL is set).
+    # On Vercel, use remote DATABASE_URL when set; otherwise fall back to ephemeral /tmp SQLite.
     if running_on_vercel():
         remote = (os.getenv("DATABASE_URL") or "").strip()
-        if remote.startswith(("postgres://", "postgresql://", "mysql://")):
+        if remote.startswith("postgres://"):
+            remote = "postgresql://" + remote[len("postgres://") :]
+        if remote.startswith("postgresql://"):
+            remote = "postgresql+psycopg://" + remote[len("postgresql://") :]
+        if remote.startswith(("postgresql+psycopg://", "mysql://")):
             SQLALCHEMY_DATABASE_URI = remote
+            SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
         else:
             absolute = INSTANCE_DIR / "personal_ai_workspace.db"
             SQLALCHEMY_DATABASE_URI = f"sqlite:///{absolute.as_posix()}"
+            SQLALCHEMY_ENGINE_OPTIONS = {}
     elif SQLALCHEMY_DATABASE_URI.startswith("sqlite:///"):
         db_path = SQLALCHEMY_DATABASE_URI.replace("sqlite:///", "", 1)
         if not os.path.isabs(db_path):
             absolute = INSTANCE_DIR / Path(db_path).name
             SQLALCHEMY_DATABASE_URI = f"sqlite:///{absolute.as_posix()}"
+
+    DURABLE_DATABASE = not SQLALCHEMY_DATABASE_URI.startswith("sqlite:")

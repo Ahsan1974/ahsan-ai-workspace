@@ -269,6 +269,19 @@
       els.messages.appendChild(buildMessageElement(message, { canRegenerate: isLatestAssistant }));
     });
     scrollToBottom(true);
+    const activeId = global.App?.getActiveConversationId?.();
+    if (activeId) {
+      global.ChatStore?.save?.(
+        {
+          id: activeId,
+          title: els.title?.textContent || "New Chat",
+          provider: document.getElementById("provider-select")?.value,
+          model: document.getElementById("model-select")?.value,
+          updated_at: new Date().toISOString(),
+        },
+        currentMessages
+      );
+    }
   }
 
   function buildMessageElement(message, options = {}) {
@@ -371,22 +384,55 @@
     return { article, contentHost, typing };
   }
 
-  async function ensureConversation() {
-    let id = global.App?.getActiveConversationId?.();
-    if (id) return id;
-    const created = await API.post("/api/conversations", {
+  async function ensureConversation(options = {}) {
+    const forceNew = Boolean(options.forceNew);
+    const seedMessages = Array.isArray(options.messages) ? options.messages : null;
+    let id = forceNew ? null : global.App?.getActiveConversationId?.();
+
+    if (id && !forceNew) {
+      try {
+        await API.get(`/api/conversations/${id}`);
+        return id;
+      } catch (err) {
+        if (err.code !== "CONVERSATION_NOT_FOUND") throw err;
+        // Stale id from another serverless instance — recreate below.
+        global.App?.setActiveConversationId?.(null);
+      }
+    }
+
+    const body = {
       provider: document.getElementById("provider-select")?.value || "groq",
       model: document.getElementById("model-select")?.value || "",
-    });
+      title: (els.title?.textContent || "New Chat").trim() || "New Chat",
+    };
+    if (seedMessages && seedMessages.length) {
+      body.messages = seedMessages
+        .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          provider: m.provider,
+          model: m.model,
+        }));
+    }
+
+    const created = await API.post("/api/conversations", body);
     const conversation = created.data;
     Sidebar.upsert(conversation);
     Sidebar.setActive(conversation.id);
     global.App?.setActiveConversationId?.(conversation.id);
     if (els.title) els.title.textContent = conversation.title || "New Chat";
+    if (conversation.messages) {
+      currentMessages = conversation.messages;
+    }
+    global.ChatStore?.save?.(conversation, conversation.messages || currentMessages);
     return conversation.id;
   }
 
   async function sendMessage() {
+    if (generating && !abortController) {
+      forceIdle();
+    }
     if (!canSend()) return;
     const text = (els.input?.value || "").trim();
     const filesToSend = pendingFiles.map((item) => item.file);
@@ -421,18 +467,29 @@
     abortController = new AbortController();
     const streamUi = createStreamingPlaceholder(provider, model);
     let assembled = "";
+    const historyBeforeSend = currentMessages.slice();
 
-    try {
-      const conversationId = await ensureConversation();
-      const useStream = preferStream();
+    const postOnce = async (conversationId, useStream) => {
       const form = new FormData();
       form.append("content", text);
       form.append("provider", provider);
       form.append("model", model);
       form.append("stream", useStream ? "true" : "false");
+      form.append(
+        "client_history",
+        JSON.stringify(
+          historyBeforeSend
+            .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+              provider: m.provider,
+              model: m.model,
+            }))
+        )
+      );
       filesToSend.forEach((file) => form.append("files", file, file.name));
-
-      let response = await fetch(`/api/conversations/${conversationId}/messages`, {
+      return fetch(`/api/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
           Accept: "text/event-stream, application/json",
@@ -440,22 +497,32 @@
         body: form,
         signal: abortController.signal,
       });
+    };
 
-      // Retry once without streaming if SSE is rejected / unavailable (common on some hosts).
+    try {
+      let conversationId = await ensureConversation();
+      let useStream = preferStream();
+      let response = await postOnce(conversationId, useStream);
       let contentType = response.headers.get("content-type") || "";
+
+      // Stale conversation on another serverless instance — recreate with history and retry once.
+      if (response.status === 404) {
+        const payload = await response.json().catch(() => null);
+        if (payload?.error?.code === "CONVERSATION_NOT_FOUND") {
+          conversationId = await ensureConversation({
+            forceNew: true,
+            messages: historyBeforeSend,
+          });
+          response = await postOnce(conversationId, useStream);
+          contentType = response.headers.get("content-type") || "";
+        }
+      }
+
       if (
-        useStream &&
-        response.ok &&
-        !contentType.includes("text/event-stream") &&
-        contentType.includes("application/json")
-      ) {
-        // Non-stream JSON success path handled below.
-      } else if (
         useStream &&
         (!response.ok || !contentType.includes("text/event-stream"))
       ) {
-        const failedStatus = response.status;
-        if (failedStatus === 413) {
+        if (response.status === 413) {
           throw Object.assign(
             new Error(
               `Upload too large for the host (max ~${Number(workspaceConfig().maxUploadMb) || 3} MB).`
@@ -463,20 +530,13 @@
             { code: "ATTACHMENT_TOO_LARGE" }
           );
         }
-        // Fall back to non-streaming JSON for platform SSE issues.
-        const retryForm = new FormData();
-        retryForm.append("content", text);
-        retryForm.append("provider", provider);
-        retryForm.append("model", model);
-        retryForm.append("stream", "false");
-        filesToSend.forEach((file) => retryForm.append("files", file, file.name));
-        response = await fetch(`/api/conversations/${conversationId}/messages`, {
-          method: "POST",
-          headers: { Accept: "application/json" },
-          body: retryForm,
-          signal: abortController.signal,
-        });
-        contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          // fall through to JSON handler
+        } else if (response.status !== 404) {
+          response = await postOnce(conversationId, false);
+          contentType = response.headers.get("content-type") || "";
+          useStream = false;
+        }
       }
 
       if (!response.ok) {
@@ -508,8 +568,16 @@
         if (data.assistant_message) currentMessages.push(data.assistant_message);
         renderMessages(currentMessages);
         if (data.conversation) {
-          Sidebar.upsert(data.conversation);
+          const oldId = global.App?.getActiveConversationId?.();
+          if (oldId && data.conversation.id && oldId !== data.conversation.id) {
+            Sidebar.remove(oldId);
+            global.ChatStore?.remove?.(oldId);
+          }
+          global.App?.setActiveConversationId?.(data.conversation.id);
+          Sidebar.setActive(data.conversation.id);
+          Sidebar.upsert({ ...data.conversation, messages: currentMessages });
           if (els.title) els.title.textContent = data.conversation.title || "New Chat";
+          global.ChatStore?.save?.(data.conversation, currentMessages);
         }
         if (data.model_switched_for_vision && data.model) {
           Notify.warning(`Switched this chat to ${data.model} for attachments.`);
@@ -527,6 +595,13 @@
               currentMessages.push(data.user_message);
             }
             if (data.conversation) {
+              const oldId = global.App?.getActiveConversationId?.();
+              if (oldId && data.conversation.id && oldId !== data.conversation.id) {
+                Sidebar.remove(oldId);
+                global.ChatStore?.remove?.(oldId);
+              }
+              global.App?.setActiveConversationId?.(data.conversation.id);
+              Sidebar.setActive(data.conversation.id);
               Sidebar.upsert(data.conversation);
               if (els.title) els.title.textContent = data.conversation.title || "New Chat";
             }
@@ -561,8 +636,16 @@
               renderMessages(currentMessages);
             }
             if (data.conversation) {
-              Sidebar.upsert(data.conversation);
+              const oldId = global.App?.getActiveConversationId?.();
+              if (oldId && data.conversation.id && oldId !== data.conversation.id) {
+                Sidebar.remove(oldId);
+                global.ChatStore?.remove?.(oldId);
+              }
+              global.App?.setActiveConversationId?.(data.conversation.id);
+              Sidebar.setActive(data.conversation.id);
+              Sidebar.upsert({ ...data.conversation, messages: currentMessages });
               if (els.title) els.title.textContent = data.conversation.title || "New Chat";
+              global.ChatStore?.save?.(data.conversation, currentMessages);
             }
             global.App?.refreshTokenStrip?.();
             global.App?.refreshConversations?.().catch(() => {});
@@ -685,7 +768,30 @@
   }
 
   function stop() {
-    if (abortController) abortController.abort();
+    if (abortController) {
+      try {
+        abortController.abort();
+      } catch {
+        /* ignore */
+      }
+      abortController = null;
+    }
+    const streaming = document.getElementById("streaming-message");
+    if (streaming) streaming.remove();
+    setGenerating(false);
+    updateSendEnabled();
+    Notify.warning("Generation stopped.");
+  }
+
+  function hasActiveRequest() {
+    return Boolean(abortController);
+  }
+
+  function forceIdle() {
+    abortController = null;
+    const streaming = document.getElementById("streaming-message");
+    if (streaming) streaming.remove();
+    setGenerating(false);
   }
 
   function setInputText(text) {
@@ -740,6 +846,9 @@
     setInputText,
     sendMessage,
     stop,
+    forceIdle,
+    hasActiveRequest,
+    getMessages: () => currentMessages.slice(),
     isGenerating: () => generating,
     setTitle: (title) => {
       if (els.title) els.title.textContent = title || "New Chat";
